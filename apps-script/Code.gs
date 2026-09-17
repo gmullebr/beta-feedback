@@ -187,10 +187,8 @@ function updateReport(body) {
 
   // Name is deliberately not editable: it is the only thing tying a report to
   // its author, so letting it change would hand ownership to someone else.
-  setCell(t, found.sheetRow, 'type', type);
-  setCell(t, found.sheetRow, 'level', level);
-  setCell(t, found.sheetRow, 'text', text);
-  setCell(t, found.sheetRow, 'updated_at', now);
+  setCells(t, found.sheetRow, found.row,
+    { type: type, level: level, text: text, updated_at: now });
 
   return {
     ok: true,
@@ -218,8 +216,8 @@ function deleteReport(body) {
   }
 
   // Soft delete: the row stays in the Sheet and is filtered out on read.
-  setCell(t, found.sheetRow, 'deleted', true);
-  setCell(t, found.sheetRow, 'updated_at', new Date().toISOString());
+  setCells(t, found.sheetRow, found.row,
+    { deleted: true, updated_at: new Date().toISOString() });
 
   return { ok: true };
 }
@@ -275,15 +273,22 @@ function setVote(body, wanted) {
  * columns by name. Reordering columns in the Sheet does not break the script;
  * renaming a header does, loudly and on purpose.
  */
+var _book = null;
+
+/** Opening the spreadsheet is itself a call, so do it once per request. */
+function book() {
+  if (!_book) _book = SpreadsheetApp.getActiveSpreadsheet();
+  return _book;
+}
+
 function readTable(tabName, expectedHeaders) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tabName);
+  var sheet = book().getSheetByName(tabName);
   if (!sheet) throw new Error('Missing tab "' + tabName + '". Check the Sheet setup.');
 
-  var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
-  if (lastRow < 1 || lastCol < 1) throw new Error('Tab "' + tabName + '" has no header row.');
-
-  var all = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  // One call. getLastRow plus getLastColumn plus getRange is three, and every
+  // one of them is a round trip to the Sheets backend.
+  var all = sheet.getDataRange().getValues();
+  if (!all.length || !all[0].length) throw new Error('Tab "' + tabName + '" has no header row.');
   var headers = [];
   var col = {};
   for (var c = 0; c < all[0].length; c++) {
@@ -305,8 +310,22 @@ function cell(row, col, header) {
   return col.hasOwnProperty(header) ? row[col[header]] : '';
 }
 
-function setCell(t, sheetRow, header, value) {
-  t.sheet.getRange(sheetRow, t.col[header] + 1).setValue(value);
+/*
+ * Writes the changed fields in a single call. Four setValue calls is four round
+ * trips; this is one. The untouched columns are written back with the values
+ * they already held.
+ */
+function setCells(t, sheetRow, row, updates) {
+  var out = [];
+  for (var c = 0; c < t.headers.length; c++) {
+    out.push(row[c] === undefined ? '' : row[c]);
+  }
+  for (var header in updates) {
+    if (updates.hasOwnProperty(header) && t.col.hasOwnProperty(header)) {
+      out[t.col[header]] = updates[header];
+    }
+  }
+  t.sheet.getRange(sheetRow, 1, 1, t.headers.length).setValues([out]);
 }
 
 /** Finds a live (non-deleted) report by id. sheetRow is the real row number. */

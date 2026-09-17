@@ -609,6 +609,36 @@ function saveName(name) {
 function forgetName() {
   try { localStorage.removeItem(NAME_KEY); } catch (e) {}
 }
+/*
+ * Apps Script answers in anything from three to eighteen seconds, and none of
+ * that is ours to fix. So the last list we saw is kept on the phone and drawn
+ * the instant the page opens, while the real one is fetched behind it. A tester
+ * who has opened this before never watches a spinner again; they see the list
+ * and it quietly corrects itself a few seconds later.
+ *
+ * This is only ever a copy of data the page just fetched, so the worst case is
+ * a list that is a few seconds stale for a few seconds.
+ */
+var CACHE_KEY = 'wcb.cache';
+var CACHE_MAX_AGE_MS = 604800000;   // a week; older than that, start clean
+
+function loadCachedReports() {
+  try {
+    var raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    if (!parsed || !parsed.savedAt || !parsed.reports) return null;
+    if (Date.now() - parsed.savedAt > CACHE_MAX_AGE_MS) return null;
+    return parsed.reports;
+  } catch (e) { return null; }
+}
+
+function saveCachedReports(reports) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), reports: reports }));
+  } catch (e) { /* private browsing, or full: the page works without it */ }
+}
+
 function sameName(a, b) {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 }
@@ -709,6 +739,7 @@ function refresh() {
       state.status = 'ready';
       state.errorText = '';
       state.lastLoadedAt = Date.now();
+      saveCachedReports(reports);
     })
     .catch(function (err) {
       // Only take over the screen when there is nothing to show. If reports are
@@ -738,7 +769,7 @@ function refresh() {
  * post is left alone deliberately, because resending it without being asked
  * could double-post; the form keeps the text so a retry is one tap.
  */
-var STALE_AFTER_MS = 60000;
+var STALE_AFTER_MS = 120000;
 
 function autoRefresh() {
   if (document.visibilityState !== 'visible') return;
@@ -1063,8 +1094,13 @@ function submitForm(event) {
       syncToolbar();
     }
     render();
+    saveCachedReports(state.reports);
     if (wasCreate) window.scrollTo({ top: 0, behavior: 'auto' });
-    refresh();   // background, to pick up anything others posted meanwhile
+    // Deliberately no refresh here. The response already told us what was
+    // written, and this endpoint gets slower the more it is called, so spending
+    // another three-to-eighteen-second request purely to discover other
+    // people's posts is a bad trade. The next time the page is opened, or
+    // Refresh is tapped, picks those up.
   }
 
   function fail() {
@@ -1178,7 +1214,7 @@ function doDelete() {
       closeConfirm();
       removeReportLocally(id);
       render();
-      refresh();   // background
+      saveCachedReports(state.reports);
     })
     .catch(function () {
       $('confirmDelete').disabled = false;
@@ -1295,6 +1331,13 @@ document.addEventListener('keydown', function (e) {
  * Start
  * ==================================================================== */
 state.name = loadName();
+
+var cached = loadCachedReports();
+if (cached && cached.length) {
+  state.reports = cached;
+  state.status = 'ready';        // draw it now; the fetch below corrects it
+}
+
 syncToolbar();
 render();
 refresh();
