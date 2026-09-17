@@ -590,6 +590,7 @@ var state = {
   sending: false,
   pendingDeleteId: null,
   loading: false,      // a fetch is in flight, so do not start another
+  slowLoad: false,     // the first load is dragging, so say so rather than look broken
   lastLoadedAt: 0      // when the list last arrived, for the staleness check
 };
 
@@ -674,8 +675,8 @@ function apiConfigured() {
  * "Sending…". Every call now has a deadline, so the promise always settles and
  * the flags always clear.
  */
-var READ_TIMEOUT_MS = 20000;
-var WRITE_TIMEOUT_MS = 25000;
+var READ_TIMEOUT_MS = 60000;
+var WRITE_TIMEOUT_MS = 60000;
 
 function fetchWithTimeout(options, ms) {
   if (typeof AbortController === 'undefined') return fetch(API_URL, options);
@@ -733,6 +734,16 @@ function refresh() {
   if (state.loading) return Promise.resolve();
   state.loading = true;
   $('refresh').disabled = true;
+
+  // Only when there is nothing on screen yet. A cached list is already showing,
+  // so a slow background refresh needs no explanation.
+  var slowTimer = null;
+  if (state.reports.length === 0) {
+    state.slowLoad = false;
+    slowTimer = setTimeout(function () {
+      if (state.loading) { state.slowLoad = true; render(); }
+    }, 6000);
+  }
   return apiGet()
     .then(function (reports) {
       state.reports = reports;
@@ -751,7 +762,9 @@ function refresh() {
       }
     })
     .then(function () {
+      if (slowTimer) clearTimeout(slowTimer);
       state.loading = false;
+      state.slowLoad = false;
       $('refresh').disabled = false;
       render();
     });
@@ -886,7 +899,9 @@ function render() {
   list.textContent = '';
 
   if (state.status === 'loading') {
-    list.appendChild(stateLine('Loading…', false));
+    list.appendChild(stateLine(
+      state.slowLoad ? 'Still loading. This can take a moment the first time.' : 'Loading…',
+      false));
     return;
   }
 
