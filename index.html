@@ -637,8 +637,29 @@ function apiConfigured() {
   return API_URL.indexOf('PASTE_THE') === -1 && /^https?:\/\//.test(API_URL);
 }
 
+/*
+ * fetch has no timeout of its own. A request that stalls on a phone, which is
+ * ordinary on mobile data, never resolves and never rejects, so any flag we set
+ * before it stays set for ever. That is what wedged the page on "Loading…" and
+ * "Sending…". Every call now has a deadline, so the promise always settles and
+ * the flags always clear.
+ */
+var READ_TIMEOUT_MS = 20000;
+var WRITE_TIMEOUT_MS = 25000;
+
+function fetchWithTimeout(options, ms) {
+  if (typeof AbortController === 'undefined') return fetch(API_URL, options);
+  var controller = new AbortController();
+  var timer = setTimeout(function () { controller.abort(); }, ms);
+  options.signal = controller.signal;
+  return fetch(API_URL, options).then(
+    function (res) { clearTimeout(timer); return res; },
+    function (err) { clearTimeout(timer); throw err; }
+  );
+}
+
 function apiGet() {
-  return fetch(API_URL, { method: 'GET' })
+  return fetchWithTimeout({ method: 'GET' }, READ_TIMEOUT_MS)
     .then(function (res) { return res.json(); })
     .then(function (data) {
       if (!data || !data.ok) throw new Error((data && data.error) || 'The store said no.');
@@ -656,11 +677,11 @@ function apiGet() {
  * default redirect handling is what follows Apps Script's redirect to its CDN.
  */
 function apiPost(payload) {
-  return fetch(API_URL, {
+  return fetchWithTimeout({
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload)
-  })
+  }, WRITE_TIMEOUT_MS)
     .then(function (res) { return res.json(); })
     .then(function (data) {
       if (!data || !data.ok) throw new Error((data && data.error) || 'The store said no.');
@@ -690,8 +711,13 @@ function refresh() {
       state.lastLoadedAt = Date.now();
     })
     .catch(function (err) {
-      state.status = 'error';
-      state.errorText = err.message || String(err);
+      // Only take over the screen when there is nothing to show. If reports are
+      // already on screen, a failed background refresh leaves them alone rather
+      // than replacing a working list with an error.
+      if (state.reports.length === 0) {
+        state.status = 'error';
+        state.errorText = err.message || String(err);
+      }
     })
     .then(function () {
       state.loading = false;
@@ -777,6 +803,51 @@ function stateLine(message, isError, detail) {
     p.appendChild(el('code', null, detail));
   }
   return p;
+}
+
+/*
+ * A write already returns the row the script wrote, so there is no reason to
+ * spend another three-second round trip asking for the whole list before showing
+ * it. Apply it here, paint immediately, and let a background refresh pick up
+ * whatever other people posted.
+ */
+function applyReportLocally(report) {
+  for (var i = 0; i < state.reports.length; i++) {
+    if (state.reports[i].id === report.id) {
+      // An edit response carries no vote data, so keep what we already had.
+      if (report.votes === undefined) report.votes = state.reports[i].votes;
+      if (!report.voters) report.voters = state.reports[i].voters;
+      state.reports[i] = report;
+      return;
+    }
+  }
+  if (report.votes === undefined) report.votes = 0;
+  if (!report.voters) report.voters = [];
+  state.reports.push(report);
+}
+
+function removeReportLocally(id) {
+  state.reports = state.reports.filter(function (r) { return r.id !== id; });
+}
+
+/*
+ * The write reached the Sheet but the answer never came back. Retrying blindly
+ * posts the report twice, which is exactly what happened in testing. So before
+ * telling anyone it failed, go and look: if a report with the same name and the
+ * same text turned up in the last ten minutes, it landed and we simply did not
+ * hear about it.
+ */
+function findAlreadyLanded(name, text) {
+  var wanted = String(text).trim();
+  return apiGet().then(function (reports) {
+    var cutoff = Date.now() - 600000;
+    for (var i = 0; i < reports.length; i++) {
+      var r = reports[i];
+      if (sameName(r.name, name) && r.text === wanted &&
+          new Date(r.created_at).getTime() >= cutoff) return r;
+    }
+    return null;
+  });
 }
 
 function render() {
@@ -978,28 +1049,40 @@ function submitForm(event) {
     : { action: 'create', name: name, type: state.type, level: state.level || '',
         text: text, device: detectDevice() };
 
+  var wasCreate = !state.editingId;
+
+  function settle(report) {
+    state.name = name;
+    saveName(name);
+    closeSheet();
+    if (report) applyReportLocally(report);
+    if (wasCreate) {
+      // The new report has to be visible, so drop back to the view that shows it.
+      state.filter = 'all';
+      state.sort = 'newest';
+      syncToolbar();
+    }
+    render();
+    if (wasCreate) window.scrollTo({ top: 0, behavior: 'auto' });
+    refresh();   // background, to pick up anything others posted meanwhile
+  }
+
+  function fail() {
+    // The sheet stays open and the typed text is untouched, so a retry is one tap.
+    state.sending = false;
+    $('submitBtn').textContent = state.editingId ? 'Save' : 'Send';
+    syncSubmit();
+    showFormError("Couldn't send. Check your connection and try again.");
+  }
+
   apiPost(payload)
-    .then(function () {
-      var wasCreate = !state.editingId;
-      state.name = name;
-      saveName(name);
-      closeSheet();
-      if (wasCreate) {
-        // The new report has to be visible, so drop back to the view that shows it.
-        state.filter = 'all';
-        state.sort = 'newest';
-        syncToolbar();
-      }
-      return refresh().then(function () {
-        if (wasCreate) window.scrollTo({ top: 0, behavior: 'auto' });
-      });
-    })
+    .then(function (data) { settle(data && data.report); })
     .catch(function () {
-      // The sheet stays open and the typed text is untouched, so a retry is one tap.
-      state.sending = false;
-      $('submitBtn').textContent = state.editingId ? 'Save' : 'Send';
-      syncSubmit();
-      showFormError("Couldn't send. Check your connection and try again.");
+      if (!wasCreate) { fail(); return; }        // edits are safe to repeat
+      $('submitBtn').textContent = 'Checking…';
+      findAlreadyLanded(name, text)
+        .then(function (landed) { if (landed) settle(landed); else fail(); })
+        .catch(fail);
     });
 }
 
@@ -1093,12 +1176,15 @@ function doDelete() {
     .then(function () {
       $('confirmDelete').disabled = false;
       closeConfirm();
-      return refresh();
+      removeReportLocally(id);
+      render();
+      refresh();   // background
     })
     .catch(function () {
       $('confirmDelete').disabled = false;
       closeConfirm();
       showToastError();
+      refresh();   // the delete may well have landed, so let the list settle it
     });
 }
 
