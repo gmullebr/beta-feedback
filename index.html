@@ -588,7 +588,9 @@ var state = {
   type: null,
   level: null,
   sending: false,
-  pendingDeleteId: null
+  pendingDeleteId: null,
+  loading: false,      // a fetch is in flight, so do not start another
+  lastLoadedAt: 0      // when the list last arrived, for the staleness check
 };
 
 var $ = function (id) { return document.getElementById(id); };
@@ -677,21 +679,46 @@ function refresh() {
     render();
     return Promise.resolve();
   }
+  if (state.loading) return Promise.resolve();
+  state.loading = true;
   $('refresh').disabled = true;
   return apiGet()
     .then(function (reports) {
       state.reports = reports;
       state.status = 'ready';
       state.errorText = '';
+      state.lastLoadedAt = Date.now();
     })
     .catch(function (err) {
       state.status = 'error';
       state.errorText = err.message || String(err);
     })
     .then(function () {
+      state.loading = false;
       $('refresh').disabled = false;
       render();
     });
+}
+
+/*
+ * The list is fetched once when the page opens. On a phone that single request
+ * fails for dull reasons: the screen was locked, wifi handed over to mobile
+ * data, the tab was frozen in the background. Without this the tester is left
+ * looking at the error line until they notice the Refresh button, which on a
+ * first visit is a good way to lose them.
+ *
+ * The browser already says when the page comes back into view and when the
+ * network returns, so we simply ask again. Only reads are retried. A failed
+ * post is left alone deliberately, because resending it without being asked
+ * could double-post; the form keeps the text so a retry is one tap.
+ */
+var STALE_AFTER_MS = 60000;
+
+function autoRefresh() {
+  if (document.visibilityState !== 'visible') return;
+  if (state.sending || state.loading) return;
+  var stale = !state.lastLoadedAt || (Date.now() - state.lastLoadedAt) > STALE_AFTER_MS;
+  if (state.status === 'error' || stale) refresh();
 }
 
 
@@ -1167,6 +1194,9 @@ $('list').addEventListener('click', function (e) {
 $('confirmCancel').addEventListener('click', closeConfirm);
 $('confirmBackdrop').addEventListener('click', closeConfirm);
 $('confirmDelete').addEventListener('click', doDelete);
+
+document.addEventListener('visibilitychange', autoRefresh);
+window.addEventListener('online', autoRefresh);
 
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
