@@ -127,6 +127,8 @@ repeated here because the real thing is Google's, not the stand-in's.
   and there is not meant to be.
 - **Deleting for real.** Testers' deletes are soft: the row stays with `deleted` set to `TRUE`. To
   remove a row permanently, delete it in the Sheet.
+- **Device is operator-only.** Every report records the phone it was written on, but the page never
+  shows it. Read it in the Sheet when you need to know whether a bug is iPhone-only.
 - **Reading a reference.** Testers quote reports as `#B14`, `#I7`, `#O3`. The letter is just the type
   (Bug, Idea, Other) and is worked out by the page; only the number is stored. So `#B14` is the row with
   `id` 14. If someone edited that report's type since posting, the letter shown will have changed but the

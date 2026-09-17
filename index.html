@@ -227,7 +227,6 @@ header.page h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
 }
 
 .meta { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
-.meta .device { opacity: .8; }
 
 .card-actions {
   display: flex;
@@ -804,10 +803,10 @@ function card(r) {
 
   article.appendChild(el('p', 'text', r.text));
 
-  var meta = el('div', 'meta');
-  meta.appendChild(document.createTextNode(r.name + ' · ' + relativeTime(r.created_at) + ' · '));
-  meta.appendChild(el('span', 'device', r.device || 'Other'));
-  article.appendChild(meta);
+  // Device is deliberately not shown. It is still captured silently and still
+  // written to the Sheet, where the operator can use it to spot an iPhone-only
+  // bug, but testers have no reason to see what phone anyone else is on.
+  article.appendChild(el('div', 'meta', r.name + ' · ' + relativeTime(r.created_at)));
 
   var actions = el('div', 'card-actions');
 
