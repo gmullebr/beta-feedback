@@ -591,6 +591,7 @@ var state = {
   pendingDeleteId: null,
   loading: false,      // a fetch is in flight, so do not start another
   slowLoad: false,     // the first load is dragging, so say so rather than look broken
+  transientError: false,  // Google had a moment, as opposed to a real failure
   lastLoadedAt: 0      // when the list last arrived, for the staleness check
 };
 
@@ -689,13 +690,54 @@ function fetchWithTimeout(options, ms) {
   );
 }
 
+/*
+ * Apps Script does not always answer with JSON. When it is rate limiting or
+ * briefly unwell it returns one of Google's HTML error pages, and res.json()
+ * then throws. Safari words that as "The string did not match the expected
+ * pattern", which tells a tester nothing and reads like our bug.
+ *
+ * So take the body as text and parse it ourselves. A body that is not JSON is
+ * Google having a moment rather than a real answer, and it is marked transient
+ * so the caller knows it is worth asking again.
+ */
+function readBody(res) {
+  return res.text().then(function (body) {
+    try {
+      return JSON.parse(body);
+    } catch (e) {
+      var err = new Error('Google answered with a page instead of data.');
+      err.transient = true;
+      throw err;
+    }
+  });
+}
+
+/*
+ * Reads are safe to repeat, so a transient answer is retried rather than shown
+ * to anybody. Writes are not retried here: a create that actually landed would
+ * be posted twice, which findAlreadyLanded exists to sort out instead.
+ *
+ * A request that hit its own deadline is not retried either. It has already
+ * taken a minute, and asking again only makes the tester wait two.
+ */
+function withRetry(attempt, triesLeft, delayMs) {
+  return attempt().catch(function (err) {
+    if (triesLeft <= 1) throw err;
+    if (err && err.name === 'AbortError') throw err;
+    return new Promise(function (resolve) { setTimeout(resolve, delayMs); })
+      .then(function () { return withRetry(attempt, triesLeft - 1, delayMs * 2); });
+  });
+}
+
 function apiGet() {
-  return fetchWithTimeout({ method: 'GET' }, READ_TIMEOUT_MS)
-    .then(function (res) { return res.json(); })
-    .then(function (data) {
-      if (!data || !data.ok) throw new Error((data && data.error) || 'The store said no.');
-      return data.reports || [];
-    });
+  return withRetry(function () {
+    return fetchWithTimeout({ method: 'GET' }, READ_TIMEOUT_MS)
+      .then(readBody)
+      .then(function (data) {
+        if (!data || !data.ok) throw new Error((data && data.error) || 'The store said no.');
+        return data.reports || [];
+      });
+  }, 3, 1200);
 }
 
 /*
@@ -713,7 +755,7 @@ function apiPost(payload) {
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload)
   }, WRITE_TIMEOUT_MS)
-    .then(function (res) { return res.json(); })
+    .then(readBody)
     .then(function (data) {
       if (!data || !data.ok) throw new Error((data && data.error) || 'The store said no.');
       return data;
@@ -759,6 +801,7 @@ function refresh() {
       if (state.reports.length === 0) {
         state.status = 'error';
         state.errorText = err.message || String(err);
+        state.transientError = !!(err && err.transient);
       }
     })
     .then(function () {
@@ -911,8 +954,11 @@ function render() {
         'Not connected yet. Paste the Apps Script web app URL into API_URL at the top of index.html.',
         true));
     } else {
-      list.appendChild(stateLine("Couldn't load the list. Check your connection and tap Refresh.",
-        true, state.errorText));
+      list.appendChild(stateLine(
+        state.transientError
+          ? 'Google is being slow right now. Tap Refresh to try again.'
+          : "Couldn't load the list. Check your connection and tap Refresh.",
+        true, state.transientError ? null : state.errorText));
     }
     return;
   }
