@@ -1,0 +1,1173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Walrus Club Beta</title>
+<style>
+/* ------------------------------------------------------------------ *
+ * Tokens. One accent colour, three muted badge colours, light + dark.
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --text: #16181d;
+  --muted: #6b7280;
+  --line: #e2e5ea;
+  --line-strong: #cbd1d9;
+  --accent: #2f6fed;
+  --accent-text: #ffffff;
+  --accent-soft: #e9f0ff;
+  --bug: #b4460d;      --bug-bg: #fdf0e7;
+  --idea: #0e6f67;     --idea-bg: #e6f5f3;
+  --other: #4f5560;    --other-bg: #eef0f3;
+  --danger: #b42318;
+  --danger-bg: #b42318;
+  --danger-fg: #ffffff;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1114;
+    --card: #181b20;
+    --text: #e7e9ed;
+    --muted: #99a0aa;
+    --line: #262a31;
+    --line-strong: #363c45;
+    --accent: #6f9bff;
+    --accent-text: #0b0d10;
+    --accent-soft: #1a2334;
+    --bug: #ffa471;     --bug-bg: #2f1f12;
+    --idea: #5fd3c4;    --idea-bg: #0e2a27;
+    --other: #b4bac4;   --other-bg: #23262c;
+    --danger: #ff8f85;
+    --danger-bg: #ff8f85;
+    --danger-fg: #2b0b08;
+    --shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* The hidden attribute only works because the browser's default stylesheet says
+   [hidden] { display: none }. Any rule of ours that sets display on the same
+   element outranks it and the element comes back. This puts it beyond reach. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  /* Nothing may scroll sideways at 375px.
+     This is "clip", not "hidden", on purpose. overflow-x: hidden forces the other
+     axis to compute as auto, which turns the element into a scroll container, and
+     position: sticky then anchors to that container instead of the viewport. The
+     sticky toolbar silently stops sticking. "clip" clips without creating one. */
+  overflow-x: clip;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.wrap {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+}
+
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* ------------------------------------------------------------------ *
+ * Header
+ * ------------------------------------------------------------------ */
+header.page { padding: 20px 0 12px; }
+header.page h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+.hint { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+
+/* ------------------------------------------------------------------ *
+ * Sticky toolbar: the Report button is always within reach.
+ * ------------------------------------------------------------------ */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg);
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+.btn-primary {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 16px;
+  font-weight: 600;
+}
+.btn-primary:active { filter: brightness(.94); }
+.btn-primary:disabled { opacity: .5; cursor: default; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.row.between { justify-content: space-between; }
+
+.chip {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--card);
+}
+.segmented button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+.segmented button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.btn-quiet {
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--muted);
+  border-radius: 999px;
+  font-size: 13px;
+  padding: 6px 11px;
+}
+.btn-quiet:disabled { opacity: .55; cursor: default; }
+
+/* ------------------------------------------------------------------ *
+ * List
+ * ------------------------------------------------------------------ */
+.state {
+  padding: 28px 4px;
+  color: var(--muted);
+  font-size: 15px;
+  text-align: center;
+}
+.state.error { color: var(--danger); }
+.state code {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 13px 14px 11px;
+  margin-bottom: 10px;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+.rid { font-size: 13px; font-weight: 600; color: var(--muted); }
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: .01em;
+}
+.badge.bug   { background: var(--bug-bg);   color: var(--bug); }
+.badge.idea  { background: var(--idea-bg);  color: var(--idea); }
+.badge.other { background: var(--other-bg); color: var(--other); }
+.level { font-size: 12.5px; color: var(--muted); }
+
+.card .text {
+  margin: 0 0 9px;
+  white-space: pre-wrap;        /* newlines as typed */
+  overflow-wrap: anywhere;      /* a pasted URL must not widen the page */
+  font-size: 15px;
+}
+
+.meta { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+.meta .device { opacity: .8; }
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The Me too control is a pill with a border so it reads as tappable,
+   and fills in when this phone's name has voted. */
+.metoo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.metoo .count {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-weight: 600;
+}
+.metoo[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.metoo[aria-pressed="true"] .count { color: var(--accent-text); opacity: .85; }
+.metoo:active { transform: scale(.97); }
+.metoo:disabled { opacity: .6; }
+
+.link-btn {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 4px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-btn.danger { color: var(--danger); }
+.spacer { flex: 1 1 auto; }
+
+/* ------------------------------------------------------------------ *
+ * Bottom sheet
+ * ------------------------------------------------------------------ */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 40;
+}
+.backdrop[hidden], .sheet[hidden] { display: none; }
+
+.sheet {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 50;
+  background: var(--card);
+  border-radius: 16px 16px 0 0;
+  border-top: 1px solid var(--line);
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 14px 16px calc(20px + env(safe-area-inset-bottom));
+  animation: rise .18s ease-out;
+}
+@keyframes rise { from { transform: translateY(14px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .sheet { animation: none; } .metoo:active { transform: none; } }
+@media (min-width: 680px) {
+  .sheet {
+    left: 50%; right: auto; bottom: 0;
+    transform: translateX(-50%);
+    width: 620px;
+    border-radius: 16px 16px 0 0;
+  }
+  @keyframes rise { from { transform: translateX(-50%) translateY(14px); opacity: .6; } to { transform: translateX(-50%); opacity: 1; } }
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.sheet-head h2 { margin: 0; font-size: 17px; }
+
+fieldset { border: 0; margin: 14px 0 0; padding: 0; }
+legend, .field-label {
+  padding: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 7px;
+  display: block;
+}
+
+.seg-big { display: flex; gap: 8px; }
+.seg-big button {
+  flex: 1 1 0;
+  min-height: 46px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.seg-big button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.levels { display: flex; flex-direction: column; gap: 7px; }
+.levels button {
+  text-align: left;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+  font-size: 14.5px;
+}
+.levels button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+input[type="text"], textarea {
+  width: 100%;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 11px 12px;
+  font-size: 16px;            /* 16px keeps iOS from zooming on focus */
+}
+input[type="text"]:disabled { opacity: .7; }
+textarea { min-height: 116px; resize: vertical; }
+input:focus-visible, textarea:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sub-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  text-decoration: underline;
+}
+
+.form-error {
+  margin: 12px 0 0;
+  color: var(--danger);
+  font-size: 13.5px;
+}
+.sheet .btn-primary { margin-top: 16px; }
+
+/* ------------------------------------------------------------------ *
+ * Confirm dialog
+ * ------------------------------------------------------------------ */
+.confirm {
+  position: fixed;
+  z-index: 60;
+  left: 16px; right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 340px;
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.28);
+}
+.confirm[hidden] { display: none; }
+.confirm p { margin: 0 0 16px; font-size: 15px; }
+.confirm .buttons { display: flex; gap: 8px; }
+.confirm .buttons button {
+  flex: 1 1 0;
+  min-height: 44px;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--line-strong);
+  background: var(--card);
+  font-size: 15px;
+  font-weight: 600;
+}
+.confirm .buttons .destroy {
+  background: var(--danger-bg);
+  border-color: var(--danger-bg);
+  color: var(--danger-fg);
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="page">
+    <h1>Walrus Club Beta</h1>
+    <p class="hint">Screenshots go in the WhatsApp group with the report number, e.g. #14</p>
+  </header>
+
+  <div class="toolbar">
+    <button type="button" id="openForm" class="btn-primary">Report something</button>
+
+    <div class="row" id="filters" role="group" aria-label="Filter by type">
+      <button type="button" class="chip" data-filter="all"   aria-pressed="true">All</button>
+      <button type="button" class="chip" data-filter="bug"   aria-pressed="false">Bug</button>
+      <button type="button" class="chip" data-filter="idea"  aria-pressed="false">Idea</button>
+      <button type="button" class="chip" data-filter="other" aria-pressed="false">Other</button>
+    </div>
+
+    <div class="row between">
+      <div class="segmented" id="sorts" role="group" aria-label="Sort">
+        <button type="button" data-sort="newest" aria-pressed="true">Newest</button>
+        <button type="button" data-sort="votes"  aria-pressed="false">Most voted</button>
+      </div>
+      <button type="button" id="refresh" class="btn-quiet">Refresh</button>
+    </div>
+  </div>
+
+  <main id="list" aria-live="polite"></main>
+</div>
+
+<!-- Report / edit sheet -->
+<div id="backdrop" class="backdrop" hidden></div>
+<section id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet-head">
+    <h2 id="sheetTitle">Report something</h2>
+    <button type="button" id="closeSheet" class="link-btn">Close</button>
+  </div>
+
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>What is it?</legend>
+      <div class="seg-big" id="typePicker">
+        <button type="button" data-type="bug"   aria-pressed="false">Bug</button>
+        <button type="button" data-type="idea"  aria-pressed="false">Idea</button>
+        <button type="button" data-type="other" aria-pressed="false">Other</button>
+      </div>
+    </fieldset>
+
+    <fieldset id="levelBlock" hidden>
+      <legend id="levelLabel">How bad is it?</legend>
+      <div class="levels" id="levelPicker"></div>
+    </fieldset>
+
+    <fieldset>
+      <label class="field-label" for="nameInput">Your name</label>
+      <input type="text" id="nameInput" autocomplete="name" enterkeyhint="next" placeholder="e.g. Anna">
+      <button type="button" id="changeName" class="sub-link" hidden>Not you? Change name</button>
+    </fieldset>
+
+    <fieldset>
+      <label class="field-label" for="textInput">Tell us</label>
+      <textarea id="textInput" placeholder="Pick a type first."></textarea>
+    </fieldset>
+
+    <p id="formError" class="form-error" hidden></p>
+
+    <button type="submit" id="submitBtn" class="btn-primary" disabled>Send</button>
+  </form>
+</section>
+
+<!-- Delete confirmation -->
+<div id="confirmBackdrop" class="backdrop" hidden></div>
+<div id="confirm" class="confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="confirmText">
+  <p id="confirmText">Delete this report?</p>
+  <div class="buttons">
+    <button type="button" id="confirmCancel">Cancel</button>
+    <button type="button" id="confirmDelete" class="destroy">Delete</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ==================================================================== *
+ * The only line that changes between "built" and "live".
+ * Paste the Apps Script web app URL here (README, step 5).
+ * It is not a secret: this page is public anyway.
+ * ==================================================================== */
+var API_URL = 'PASTE_THE_APPS_SCRIPT_WEB_APP_URL_HERE';
+
+var NAME_KEY = 'wcb.name';
+
+var LEVELS = {
+  bug: {
+    label: 'How bad is it?',
+    options: [
+      { value: 'blocker',  wording: "Can't continue" },
+      { value: 'annoying', wording: 'Annoying, I worked around it' },
+      { value: 'cosmetic', wording: 'Cosmetic' }
+    ]
+  },
+  idea: {
+    label: 'How much does it matter?',
+    options: [
+      { value: 'must',  wording: 'Must have' },
+      { value: 'nice',  wording: 'Nice to have' },
+      { value: 'maybe', wording: 'Just an idea' }
+    ]
+  },
+  other: { label: '', options: [] }
+};
+
+var PLACEHOLDERS = {
+  bug: 'What happened, what did you expect, and on which screen?',
+  idea: 'What would you like, and why?',
+  other: 'Anything else on your mind.'
+};
+
+var TYPE_WORDING = { bug: 'Bug', idea: 'Idea', other: 'Other' };
+
+var state = {
+  reports: [],
+  filter: 'all',
+  sort: 'newest',
+  name: '',
+  status: 'loading',   // loading | ready | error
+  errorText: '',
+  editingId: null,
+  type: null,
+  level: null,
+  sending: false,
+  pendingDeleteId: null
+};
+
+var $ = function (id) { return document.getElementById(id); };
+
+
+/* ==================================================================== *
+ * Remembered name. Private browsing can make localStorage throw on
+ * access, not just return null, so every touch is wrapped.
+ * ==================================================================== */
+function loadName() {
+  try { return (localStorage.getItem(NAME_KEY) || '').trim(); } catch (e) { return ''; }
+}
+function saveName(name) {
+  try { localStorage.setItem(NAME_KEY, name); } catch (e) { /* private browsing: just forget */ }
+}
+function forgetName() {
+  try { localStorage.removeItem(NAME_KEY); } catch (e) {}
+}
+function sameName(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+
+/* ==================================================================== *
+ * Device, guessed from the user agent. Silent, per decision 11.
+ * ==================================================================== */
+function detectDevice() {
+  var ua = navigator.userAgent || '';
+  if (/iPhone|iPod/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  // iPadOS 13+ pretends to be a Mac. A Mac with touch points is an iPad.
+  if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Macintosh|Mac OS X/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'Windows';
+  return 'Other';
+}
+
+
+/* ==================================================================== *
+ * Talking to the door
+ * ==================================================================== */
+function apiConfigured() {
+  return API_URL.indexOf('PASTE_THE') === -1 && /^https?:\/\//.test(API_URL);
+}
+
+function apiGet() {
+  return fetch(API_URL, { method: 'GET' })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) throw new Error((data && data.error) || 'The store said no.');
+      return data.reports || [];
+    });
+}
+
+/*
+ * The POST goes out as text/plain on purpose.
+ * A JSON content type makes the browser send a preflight OPTIONS request first,
+ * and Apps Script does not answer those, so the call fails before it starts.
+ * text/plain is on the CORS safelist, so the browser sends the POST directly and
+ * the script parses the body string itself.
+ * mode is left alone: 'no-cors' would make the response body unreadable, and the
+ * default redirect handling is what follows Apps Script's redirect to its CDN.
+ */
+function apiPost(payload) {
+  return fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) throw new Error((data && data.error) || 'The store said no.');
+      return data;
+    });
+}
+
+
+/* ==================================================================== *
+ * Loading the list
+ * ==================================================================== */
+function refresh() {
+  if (!apiConfigured()) {
+    state.status = 'error';
+    state.errorText = 'setup';
+    render();
+    return Promise.resolve();
+  }
+  $('refresh').disabled = true;
+  return apiGet()
+    .then(function (reports) {
+      state.reports = reports;
+      state.status = 'ready';
+      state.errorText = '';
+    })
+    .catch(function (err) {
+      state.status = 'error';
+      state.errorText = err.message || String(err);
+    })
+    .then(function () {
+      $('refresh').disabled = false;
+      render();
+    });
+}
+
+
+/* ==================================================================== *
+ * Rendering
+ * ==================================================================== */
+function relativeTime(iso) {
+  var then = new Date(iso).getTime();
+  if (!then || isNaN(then)) return '';
+  var secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return 'just now';
+  var mins = Math.round(secs / 60);
+  if (mins < 60) return mins + ' min ago';
+  var hours = Math.round(mins / 60);
+  if (hours < 24) return hours + ' h ago';
+  var days = Math.round(hours / 24);
+  if (days < 7) return days + ' d ago';
+  return new Date(then).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+function levelWording(type, level) {
+  var group = LEVELS[type];
+  if (!group || !level) return '';
+  for (var i = 0; i < group.options.length; i++) {
+    if (group.options[i].value === level) return group.options[i].wording;
+  }
+  return '';
+}
+
+function visibleReports() {
+  var list = state.reports.slice();
+  if (state.filter !== 'all') {
+    list = list.filter(function (r) { return r.type === state.filter; });
+  }
+  if (state.sort === 'votes') {
+    list.sort(function (a, b) { return (b.votes - a.votes) || (b.id - a.id); });
+  } else {
+    list.sort(function (a, b) { return b.id - a.id; });
+  }
+  return list;
+}
+
+/* Every piece of tester text goes in with textContent, never innerHTML.
+   Someone posting "<img onerror=...>" should read as those characters, not run. */
+function el(tag, className, text) {
+  var node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function stateLine(message, isError, detail) {
+  var p = el('p', 'state' + (isError ? ' error' : ''), message);
+  if (detail) {
+    p.appendChild(document.createElement('br'));
+    p.appendChild(el('code', null, detail));
+  }
+  return p;
+}
+
+function render() {
+  var list = $('list');
+  list.textContent = '';
+
+  if (state.status === 'loading') {
+    list.appendChild(stateLine('Loading…', false));
+    return;
+  }
+
+  if (state.status === 'error') {
+    if (state.errorText === 'setup') {
+      list.appendChild(stateLine(
+        'Not connected yet. Paste the Apps Script web app URL into API_URL at the top of index.html.',
+        true));
+    } else {
+      list.appendChild(stateLine("Couldn't load the list. Check your connection and tap Refresh.",
+        true, state.errorText));
+    }
+    return;
+  }
+
+  var reports = visibleReports();
+
+  if (reports.length === 0) {
+    if (state.reports.length === 0) {
+      list.appendChild(stateLine('Nothing here yet. Be the first to report something.', false));
+    } else {
+      list.appendChild(stateLine('No ' + TYPE_WORDING[state.filter].toLowerCase() +
+        ' reports yet. Try another filter.', false));
+    }
+    return;
+  }
+
+  for (var i = 0; i < reports.length; i++) {
+    list.appendChild(card(reports[i]));
+  }
+}
+
+function card(r) {
+  var article = el('article', 'card');
+  article.setAttribute('data-id', String(r.id));
+
+  var top = el('div', 'card-top');
+  top.appendChild(el('span', 'rid', '#' + r.id));
+  top.appendChild(el('span', 'badge ' + r.type, TYPE_WORDING[r.type] || r.type));
+  var wording = levelWording(r.type, r.level);
+  if (wording) top.appendChild(el('span', 'level', wording));
+  article.appendChild(top);
+
+  article.appendChild(el('p', 'text', r.text));
+
+  var meta = el('div', 'meta');
+  meta.appendChild(document.createTextNode(r.name + ' · ' + relativeTime(r.created_at) + ' · '));
+  meta.appendChild(el('span', 'device', r.device || 'Other'));
+  article.appendChild(meta);
+
+  var actions = el('div', 'card-actions');
+
+  var voted = state.name && (r.voters || []).some(function (v) { return sameName(v, state.name); });
+  var vote = el('button', 'metoo');
+  vote.type = 'button';
+  vote.setAttribute('aria-pressed', voted ? 'true' : 'false');
+  vote.setAttribute('data-vote', String(r.id));
+  vote.appendChild(el('span', null, voted ? 'Me too' : 'Me too'));
+  vote.appendChild(el('span', 'count', String(r.votes || 0)));
+  vote.setAttribute('aria-label', (voted ? 'Remove your me too from' : 'Me too on') +
+    ' report ' + r.id + ', ' + (r.votes || 0) + ' so far');
+  actions.appendChild(vote);
+
+  if (state.name && sameName(r.name, state.name)) {
+    actions.appendChild(el('span', 'spacer'));
+    var edit = el('button', 'link-btn', 'Edit');
+    edit.type = 'button';
+    edit.setAttribute('data-edit', String(r.id));
+    actions.appendChild(edit);
+
+    var del = el('button', 'link-btn danger', 'Delete');
+    del.type = 'button';
+    del.setAttribute('data-delete', String(r.id));
+    actions.appendChild(del);
+  }
+
+  article.appendChild(actions);
+  return article;
+}
+
+
+/* ==================================================================== *
+ * The sheet
+ * ==================================================================== */
+function renderLevels() {
+  var block = $('levelBlock');
+  var picker = $('levelPicker');
+  picker.textContent = '';
+
+  if (!state.type || LEVELS[state.type].options.length === 0) {
+    block.hidden = true;               // no type picked yet, or "Other"
+    return;
+  }
+
+  $('levelLabel').textContent = LEVELS[state.type].label;
+  var options = LEVELS[state.type].options;
+  for (var i = 0; i < options.length; i++) {
+    var b = el('button', null, options[i].wording);
+    b.type = 'button';
+    b.setAttribute('data-level', options[i].value);
+    b.setAttribute('aria-pressed', state.level === options[i].value ? 'true' : 'false');
+    picker.appendChild(b);
+  }
+  block.hidden = false;
+}
+
+function syncTypeButtons() {
+  var buttons = $('typePicker').querySelectorAll('button');
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].setAttribute('aria-pressed',
+      buttons[i].getAttribute('data-type') === state.type ? 'true' : 'false');
+  }
+  $('textInput').placeholder = state.type ? PLACEHOLDERS[state.type] : 'Pick a type first.';
+}
+
+function formValid() {
+  if (!state.type) return false;
+  if (LEVELS[state.type].options.length > 0 && !state.level) return false;
+  if (!$('nameInput').value.trim()) return false;
+  if (!$('textInput').value.trim()) return false;
+  return true;
+}
+
+function syncSubmit() {
+  $('submitBtn').disabled = state.sending || !formValid();
+}
+
+function openSheet(report) {
+  state.editingId = report ? report.id : null;
+  state.type = report ? report.type : null;
+  state.level = report ? (report.level || null) : null;
+  state.sending = false;
+
+  $('sheetTitle').textContent = report ? ('Edit #' + report.id) : 'Report something';
+  $('submitBtn').textContent = report ? 'Save' : 'Send';
+  $('textInput').value = report ? report.text : '';
+  $('formError').hidden = true;
+
+  var nameInput = $('nameInput');
+  if (report) {
+    // Name is what ties a report to its author, so editing cannot change it.
+    nameInput.value = report.name;
+    nameInput.disabled = true;
+    $('changeName').hidden = true;
+  } else {
+    nameInput.value = state.name || '';
+    nameInput.disabled = false;
+    $('changeName').hidden = !state.name;
+  }
+
+  syncTypeButtons();
+  renderLevels();
+  syncSubmit();
+
+  $('backdrop').hidden = false;
+  $('sheet').hidden = false;
+  document.body.style.overflow = 'hidden';
+
+  if (!report && !state.name) nameInput.focus();
+}
+
+function closeSheet() {
+  $('sheet').hidden = true;
+  $('backdrop').hidden = true;
+  document.body.style.overflow = '';
+  state.editingId = null;
+  state.sending = false;
+}
+
+function showFormError(message) {
+  var line = $('formError');
+  line.textContent = message;
+  line.hidden = false;
+}
+
+function submitForm(event) {
+  event.preventDefault();
+  if (!formValid() || state.sending) return;
+
+  var name = $('nameInput').value.trim();
+  var text = $('textInput').value;
+
+  state.sending = true;
+  $('submitBtn').disabled = true;
+  $('submitBtn').textContent = state.editingId ? 'Saving…' : 'Sending…';
+  $('formError').hidden = true;
+
+  var payload = state.editingId
+    ? { action: 'update', id: state.editingId, name: name, type: state.type,
+        level: state.level || '', text: text }
+    : { action: 'create', name: name, type: state.type, level: state.level || '',
+        text: text, device: detectDevice() };
+
+  apiPost(payload)
+    .then(function () {
+      var wasCreate = !state.editingId;
+      state.name = name;
+      saveName(name);
+      closeSheet();
+      if (wasCreate) {
+        // The new report has to be visible, so drop back to the view that shows it.
+        state.filter = 'all';
+        state.sort = 'newest';
+        syncToolbar();
+      }
+      return refresh().then(function () {
+        if (wasCreate) window.scrollTo({ top: 0, behavior: 'auto' });
+      });
+    })
+    .catch(function () {
+      // The sheet stays open and the typed text is untouched, so a retry is one tap.
+      state.sending = false;
+      $('submitBtn').textContent = state.editingId ? 'Save' : 'Send';
+      syncSubmit();
+      showFormError("Couldn't send. Check your connection and try again.");
+    });
+}
+
+
+/* ==================================================================== *
+ * Voting
+ * ==================================================================== */
+function toggleVote(id, button) {
+  if (!state.name) {
+    // No name on this phone yet, so there is nothing to vote as.
+    openSheet(null);
+    showFormError('Add your name and post something first, then you can vote.');
+    return;
+  }
+
+  var report = null;
+  for (var i = 0; i < state.reports.length; i++) {
+    if (state.reports[i].id === id) { report = state.reports[i]; break; }
+  }
+  if (!report) return;
+
+  var voted = button.getAttribute('aria-pressed') === 'true';
+  var wanted = !voted;
+
+  // Paint the new state now. An Apps Script round trip takes a second or two and
+  // a button that does nothing for that long reads as broken. The refetch below
+  // is the real answer; on failure this snaps back.
+  applyVoteLocally(report, wanted);
+  redrawVote(button, report, wanted);
+
+  apiPost({ action: wanted ? 'vote' : 'unvote', id: id, name: state.name })
+    .then(function () { return refresh(); })
+    .catch(function () {
+      applyVoteLocally(report, voted);
+      redrawVote(button, report, voted);
+      showToastError();
+    });
+}
+
+function applyVoteLocally(report, voted) {
+  report.voters = (report.voters || []).filter(function (v) { return !sameName(v, state.name); });
+  if (voted) report.voters.push(state.name);
+  report.votes = report.voters.length;
+}
+
+function redrawVote(button, report, voted) {
+  button.setAttribute('aria-pressed', voted ? 'true' : 'false');
+  var count = button.querySelector('.count');
+  if (count) count.textContent = String(report.votes);
+  button.setAttribute('aria-label', (voted ? 'Remove your me too from' : 'Me too on') +
+    ' report ' + report.id + ', ' + report.votes + ' so far');
+}
+
+var toastTimer = null;
+function showToastError() {
+  var list = $('list');
+  var existing = document.getElementById('voteToast');
+  if (existing) existing.remove();
+  var p = stateLine("Couldn't save that. Check your connection.", true);
+  p.id = 'voteToast';
+  list.insertBefore(p, list.firstChild);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () {
+    var node = document.getElementById('voteToast');
+    if (node) node.remove();
+  }, 4000);
+}
+
+
+/* ==================================================================== *
+ * Delete
+ * ==================================================================== */
+function askDelete(id) {
+  state.pendingDeleteId = id;
+  $('confirmText').textContent = 'Delete #' + id + "? This can't be undone from here.";
+  $('confirmBackdrop').hidden = false;
+  $('confirm').hidden = false;
+  $('confirmDelete').focus();
+}
+
+function closeConfirm() {
+  $('confirm').hidden = true;
+  $('confirmBackdrop').hidden = true;
+  state.pendingDeleteId = null;
+}
+
+function doDelete() {
+  var id = state.pendingDeleteId;
+  if (!id) return;
+  $('confirmDelete').disabled = true;
+  apiPost({ action: 'delete', id: id, name: state.name })
+    .then(function () {
+      $('confirmDelete').disabled = false;
+      closeConfirm();
+      return refresh();
+    })
+    .catch(function () {
+      $('confirmDelete').disabled = false;
+      closeConfirm();
+      showToastError();
+    });
+}
+
+
+/* ==================================================================== *
+ * Toolbar
+ * ==================================================================== */
+function syncToolbar() {
+  var chips = $('filters').querySelectorAll('button');
+  for (var i = 0; i < chips.length; i++) {
+    chips[i].setAttribute('aria-pressed',
+      chips[i].getAttribute('data-filter') === state.filter ? 'true' : 'false');
+  }
+  var sorts = $('sorts').querySelectorAll('button');
+  for (var j = 0; j < sorts.length; j++) {
+    sorts[j].setAttribute('aria-pressed',
+      sorts[j].getAttribute('data-sort') === state.sort ? 'true' : 'false');
+  }
+}
+
+
+/* ==================================================================== *
+ * Wiring
+ * ==================================================================== */
+$('openForm').addEventListener('click', function () { openSheet(null); });
+$('closeSheet').addEventListener('click', closeSheet);
+$('backdrop').addEventListener('click', closeSheet);
+$('refresh').addEventListener('click', function () { refresh(); });
+
+$('filters').addEventListener('click', function (e) {
+  var button = e.target.closest('button[data-filter]');
+  if (!button) return;
+  state.filter = button.getAttribute('data-filter');
+  syncToolbar();
+  render();
+});
+
+$('sorts').addEventListener('click', function (e) {
+  var button = e.target.closest('button[data-sort]');
+  if (!button) return;
+  state.sort = button.getAttribute('data-sort');
+  syncToolbar();
+  render();
+});
+
+$('typePicker').addEventListener('click', function (e) {
+  var button = e.target.closest('button[data-type]');
+  if (!button) return;
+  state.type = button.getAttribute('data-type');
+  state.level = null;
+  syncTypeButtons();
+  renderLevels();
+  syncSubmit();
+});
+
+$('levelPicker').addEventListener('click', function (e) {
+  var button = e.target.closest('button[data-level]');
+  if (!button) return;
+  state.level = button.getAttribute('data-level');
+  renderLevels();
+  syncSubmit();
+});
+
+$('changeName').addEventListener('click', function () {
+  state.name = '';
+  forgetName();
+  $('nameInput').value = '';
+  $('changeName').hidden = true;
+  $('nameInput').focus();
+  syncSubmit();
+  render();
+});
+
+$('nameInput').addEventListener('input', syncSubmit);
+$('textInput').addEventListener('input', syncSubmit);
+$('form').addEventListener('submit', submitForm);
+
+$('list').addEventListener('click', function (e) {
+  var voteButton = e.target.closest('button[data-vote]');
+  if (voteButton) { toggleVote(Number(voteButton.getAttribute('data-vote')), voteButton); return; }
+
+  var editButton = e.target.closest('button[data-edit]');
+  if (editButton) {
+    var editId = Number(editButton.getAttribute('data-edit'));
+    for (var i = 0; i < state.reports.length; i++) {
+      if (state.reports[i].id === editId) { openSheet(state.reports[i]); return; }
+    }
+    return;
+  }
+
+  var deleteButton = e.target.closest('button[data-delete]');
+  if (deleteButton) askDelete(Number(deleteButton.getAttribute('data-delete')));
+});
+
+$('confirmCancel').addEventListener('click', closeConfirm);
+$('confirmBackdrop').addEventListener('click', closeConfirm);
+$('confirmDelete').addEventListener('click', doDelete);
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  if (!$('confirm').hidden) { closeConfirm(); return; }
+  if (!$('sheet').hidden) closeSheet();
+});
+
+
+/* ==================================================================== *
+ * Start
+ * ==================================================================== */
+state.name = loadName();
+syncToolbar();
+render();
+refresh();
+</script>
+</body>
+</html>
