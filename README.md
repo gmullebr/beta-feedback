@@ -88,6 +88,19 @@ Then Settings → Pages → Source: Deploy from a branch → Branch `main`, fold
 The address is `https://gmullebr.github.io/beta-feedback/`. Each `git push` updates the live page
 within about a minute.
 
+### Putting a Walrus Club address in front of it (decision 25)
+
+Pending a name agreed with the founder. Pages keeps serving the page either way, so the one-minute
+deploy loop does not change. When the name is settled, it is two steps:
+
+1. Whoever holds the DNS adds one `CNAME` record, for example `feedback` pointing at
+   `gmullebr.github.io.` (the trailing dot matters).
+2. In the repo, add a file named `CNAME` containing just the full domain, then push. Settings → Pages
+   → Custom domain will pick it up and issue the certificate, which takes a few minutes.
+
+Do not add the `CNAME` file before the DNS record exists and resolves. Pages will start serving on a
+domain that does not answer, and the live page goes dark until you remove it.
+
 ## Go-live checklist
 
 Run these before sending the link to testers, on a phone or in a browser's phone emulation.
@@ -114,7 +127,11 @@ repeated here because the real thing is Google's, not the stand-in's.
   and there is not meant to be.
 - **Deleting for real.** Testers' deletes are soft: the row stays with `deleted` set to `TRUE`. To
   remove a row permanently, delete it in the Sheet.
-- **Screenshots** go in the WhatsApp group with the report number, for example `#14`. The page says
+- **Reading a reference.** Testers quote reports as `#B14`, `#I7`, `#O3`. The letter is just the type
+  (Bug, Idea, Other) and is worked out by the page; only the number is stored. So `#B14` is the row with
+  `id` 14. If someone edited that report's type since posting, the letter shown will have changed but the
+  number never does, so look up the number and ignore the letter.
+- **Screenshots** go in the WhatsApp group with the report number, for example `#B14`. The page says
   so at the top.
 - **Fixing data by hand** is fine. Edit cells in the Sheet directly; the page picks the change up on
   the next Refresh. Do not renumber `id`, since `votes.report_id` points at it.

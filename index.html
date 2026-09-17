@@ -445,7 +445,7 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
 <div class="wrap">
   <header class="page">
     <h1>Walrus Club Beta</h1>
-    <p class="hint">Screenshots go in the WhatsApp group with the report number, e.g. #14</p>
+    <p class="hint">Screenshots go in the WhatsApp group with the report number, e.g. #B14</p>
   </header>
 
   <div class="toolbar">
@@ -559,6 +559,24 @@ var PLACEHOLDERS = {
 };
 
 var TYPE_WORDING = { bug: 'Bug', idea: 'Idea', other: 'Other' };
+var TYPE_LETTER  = { bug: 'B', idea: 'I', other: 'O' };
+
+/*
+ * Reports carry one global number, and the letter in front of it is derived from
+ * the type rather than stored. Nothing extra goes in the Sheet, and the number
+ * stays unique even when someone edits a Bug into an Idea. The letter can go
+ * stale on an edited report; the number it is attached to never does, so a "#B14"
+ * posted in WhatsApp always still finds report 14.
+ */
+function reportRef(report) { return (TYPE_LETTER[report.type] || '') + report.id; }
+function reportLabel(report) { return '#' + reportRef(report); }
+
+function findReport(id) {
+  for (var i = 0; i < state.reports.length; i++) {
+    if (state.reports[i].id === id) return state.reports[i];
+  }
+  return null;
+}
 
 var state = {
   reports: [],
@@ -778,7 +796,7 @@ function card(r) {
   article.setAttribute('data-id', String(r.id));
 
   var top = el('div', 'card-top');
-  top.appendChild(el('span', 'rid', '#' + r.id));
+  top.appendChild(el('span', 'rid', reportLabel(r)));
   top.appendChild(el('span', 'badge ' + r.type, TYPE_WORDING[r.type] || r.type));
   var wording = levelWording(r.type, r.level);
   if (wording) top.appendChild(el('span', 'level', wording));
@@ -801,7 +819,7 @@ function card(r) {
   vote.appendChild(el('span', null, voted ? 'Me too' : 'Me too'));
   vote.appendChild(el('span', 'count', String(r.votes || 0)));
   vote.setAttribute('aria-label', (voted ? 'Remove your me too from' : 'Me too on') +
-    ' report ' + r.id + ', ' + (r.votes || 0) + ' so far');
+    ' report ' + reportRef(r) + ', ' + (r.votes || 0) + ' so far');
   actions.appendChild(vote);
 
   if (state.name && sameName(r.name, state.name)) {
@@ -874,7 +892,7 @@ function openSheet(report) {
   state.level = report ? (report.level || null) : null;
   state.sending = false;
 
-  $('sheetTitle').textContent = report ? ('Edit #' + report.id) : 'Report something';
+  $('sheetTitle').textContent = report ? ('Edit ' + reportLabel(report)) : 'Report something';
   $('submitBtn').textContent = report ? 'Save' : 'Send';
   $('textInput').value = report ? report.text : '';
   $('formError').hidden = true;
@@ -971,10 +989,7 @@ function toggleVote(id, button) {
     return;
   }
 
-  var report = null;
-  for (var i = 0; i < state.reports.length; i++) {
-    if (state.reports[i].id === id) { report = state.reports[i]; break; }
-  }
+  var report = findReport(id);
   if (!report) return;
 
   var voted = button.getAttribute('aria-pressed') === 'true';
@@ -1006,7 +1021,7 @@ function redrawVote(button, report, voted) {
   var count = button.querySelector('.count');
   if (count) count.textContent = String(report.votes);
   button.setAttribute('aria-label', (voted ? 'Remove your me too from' : 'Me too on') +
-    ' report ' + report.id + ', ' + report.votes + ' so far');
+    ' report ' + reportRef(report) + ', ' + report.votes + ' so far');
 }
 
 var toastTimer = null;
@@ -1029,8 +1044,10 @@ function showToastError() {
  * Delete
  * ==================================================================== */
 function askDelete(id) {
+  var report = findReport(id);
+  if (!report) return;
   state.pendingDeleteId = id;
-  $('confirmText').textContent = 'Delete #' + id + "? This can't be undone from here.";
+  $('confirmText').textContent = 'Delete ' + reportLabel(report) + "? This can't be undone from here.";
   $('confirmBackdrop').hidden = false;
   $('confirm').hidden = false;
   $('confirmDelete').focus();
@@ -1139,10 +1156,8 @@ $('list').addEventListener('click', function (e) {
 
   var editButton = e.target.closest('button[data-edit]');
   if (editButton) {
-    var editId = Number(editButton.getAttribute('data-edit'));
-    for (var i = 0; i < state.reports.length; i++) {
-      if (state.reports[i].id === editId) { openSheet(state.reports[i]); return; }
-    }
+    var report = findReport(Number(editButton.getAttribute('data-edit')));
+    if (report) openSheet(report);
     return;
   }
 
