@@ -375,23 +375,41 @@ function findReportRow(t, rawId) {
  * ------------------------------------------------------------------ */
 
 /**
- * The folder the door writes pictures into, found by name at the root of the
- * owner's Drive and created on the first upload. Nothing to set up by hand, and
- * nothing to configure: a folder id in this file would be one more thing to keep
- * in step between the repo and the pasted copy.
+ * The folder the door writes pictures into, created on the first upload.
+ * Nothing to set up by hand.
  *
- * Cached like _book, because getFoldersByName is a round trip and a create with
- * two pictures would otherwise pay for it twice.
+ * Why the id is remembered rather than the folder searched for by name: the
+ * manifest grants the script the narrow drive.file scope, which covers only
+ * files it created itself. Searching Drive by name is a "read all of Drive"
+ * action and needs the wide scope, which is exactly the permission the manifest
+ * exists to avoid. Opening a folder by id is allowed for a folder the script
+ * made, so the id goes into the script's own key-value store (PropertiesService,
+ * no scope needed) the moment the folder is created.
+ *
+ * If the operator trashes or deletes that folder, the stored id points at
+ * nothing and a fresh folder is created on the next upload. Old pictures stay
+ * where they were and their ids in the Sheet still resolve.
+ *
+ * Cached like _book: a create with two pictures would otherwise open the folder twice.
  */
+var FOLDER_ID_KEY = 'imageFolderId';
 var _imageFolder = null;
 
 function imageFolder() {
   if (_imageFolder) return _imageFolder;
 
-  var existing = DriveApp.getFoldersByName(IMAGE_FOLDER_NAME);
-  if (existing.hasNext()) {
-    _imageFolder = existing.next();
-    return _imageFolder;
+  var props = PropertiesService.getScriptProperties();
+  var storedId = props.getProperty(FOLDER_ID_KEY);
+  if (storedId) {
+    try {
+      var found = DriveApp.getFolderById(storedId);
+      if (!found.isTrashed()) {
+        _imageFolder = found;
+        return _imageFolder;
+      }
+    } catch (err) {
+      // Deleted for good, or never ours. Fall through and make a new one.
+    }
   }
 
   _imageFolder = DriveApp.createFolder(IMAGE_FOLDER_NAME);
@@ -399,6 +417,7 @@ function imageFolder() {
   // Google account at all, so "anyone with the link can view" is what makes them
   // load. Accepted with decision 27: these images are reachable by URL.
   _imageFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  props.setProperty(FOLDER_ID_KEY, _imageFolder.getId());
   return _imageFolder;
 }
 
