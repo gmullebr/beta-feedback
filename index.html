@@ -89,7 +89,6 @@ button { cursor: pointer; }
  * ------------------------------------------------------------------ */
 header.page { padding: 20px 0 12px; }
 header.page h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
-.hint { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
 
 /* ------------------------------------------------------------------ *
  * Sticky toolbar: the Report button is always within reach.
@@ -224,6 +223,26 @@ header.page h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
   white-space: pre-wrap;        /* newlines as typed */
   overflow-wrap: anywhere;      /* a pasted URL must not widen the page */
   font-size: 15px;
+}
+
+/* Screenshots on a card. max-width matters more than it looks: a tall narrow
+   phone screenshot is fine, but a wide one scaled to 96px high would otherwise
+   be several hundred pixels across and push the card past 375px. */
+.shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.shots a { display: block; line-height: 0; }
+.shots img {
+  height: 96px;
+  width: auto;
+  max-width: 140px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
 }
 
 .meta { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
@@ -390,6 +409,40 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
   text-decoration: underline;
 }
 
+/* Screenshot picker in the form. The previews are smaller than the card's,
+   because here they only have to confirm "yes, that is the screen I meant". */
+.pics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.pic { position: relative; line-height: 0; }
+.pic img {
+  height: 72px;
+  width: auto;
+  max-width: 110px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+}
+.pic .drop {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  box-shadow: var(--shadow);
+}
+
 .form-error {
   margin: 12px 0 0;
   color: var(--danger);
@@ -444,7 +497,6 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
 <div class="wrap">
   <header class="page">
     <h1>Walrus Club Beta</h1>
-    <p class="hint">Screenshots go in the WhatsApp group with the report number, e.g. #B14</p>
   </header>
 
   <div class="toolbar">
@@ -501,6 +553,18 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
     <fieldset>
       <label class="field-label" for="textInput">Tell us</label>
       <textarea id="textInput" placeholder="Pick a type first."></textarea>
+    </fieldset>
+
+    <fieldset>
+      <span class="field-label">Screenshots</span>
+      <!-- The real file input is kept off screen and opened by the button next to
+           it. A browser will not let us restyle the native "Choose file" control,
+           and it looks nothing like the rest of the form. sr-only rather than
+           hidden, because some browsers refuse to open a picker for an input that
+           is display:none. -->
+      <input type="file" id="picInput" class="sr-only" accept="image/*" multiple tabindex="-1" aria-hidden="true">
+      <button type="button" id="addPic" class="btn-quiet">Add a screenshot</button>
+      <div class="pics" id="picList"></div>
     </fieldset>
 
     <p id="formError" class="form-error" hidden></p>
@@ -587,6 +651,7 @@ var state = {
   editingId: null,
   type: null,
   level: null,
+  images: [],          // what the form will send: new pictures, or kept Drive ids
   sending: false,
   pendingDeleteId: null,
   loading: false,      // a fetch is in flight, so do not start another
@@ -659,6 +724,136 @@ function detectDevice() {
   if (/Macintosh|Mac OS X/.test(ua)) return 'Mac';
   if (/Windows/.test(ua)) return 'Windows';
   return 'Other';
+}
+
+
+/* ==================================================================== *
+ * Screenshots (decisions 27 to 31)
+ * ==================================================================== */
+var MAX_IMAGES = 2;
+var MAX_IMAGE_EDGE = 1280;
+var IMAGE_QUALITY = 0.8;
+
+/*
+ * The two Google endpoints that serve a publicly shared Drive image without a
+ * login. They are the first thing to check if pictures stop showing: they are
+ * Google's URLs, not ours, and if Google changes them nothing in the door or the
+ * Sheet will look wrong, only these two lines.
+ *
+ * thumbnail: small and fast, what the card shows.
+ * lh3: the full-size file, what opens when a thumbnail is tapped.
+ */
+function thumbUrl(id) {
+  return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(id) + '&sz=w400';
+}
+function fullUrl(id) {
+  return 'https://lh3.googleusercontent.com/d/' + encodeURIComponent(id);
+}
+
+/*
+ * A phone screenshot straight off the camera roll is 2 to 5 MB. Two of those in
+ * one POST would make Send take the better part of a minute on mobile data, and
+ * the door refuses anything over its size cap anyway. So each picture is redrawn
+ * at 1280 px on its long side and re-encoded as JPEG here, on the phone, which
+ * lands at roughly 150 KB and is still perfectly readable for a bug report.
+ *
+ * Never upscaled: enlarging a small picture makes a bigger file out of the same
+ * detail, which is all cost and no gain.
+ *
+ * This happens when the file is picked, not when Send is tapped, so the wait sits
+ * where the tester is already choosing something rather than in front of Send.
+ */
+function shrinkImage(file) {
+  return decodeImage(file).then(function (source) {
+    var scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(source.width, source.height));
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(source.width * scale));
+    canvas.height = Math.max(1, Math.round(source.height * scale));
+    canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+    if (source.close) source.close();     // an ImageBitmap holds memory until released
+
+    // toDataURL gives "data:image/jpeg;base64,AAAA". The door wants the part
+    // after the comma, and the whole string doubles as the preview's src.
+    var url = canvas.toDataURL('image/jpeg', IMAGE_QUALITY);
+    return { mime: 'image/jpeg', data: url.slice(url.indexOf(',') + 1), previewUrl: url };
+  });
+}
+
+/* createImageBitmap is the direct route and decodes off the main thread. Older
+   Safari does not have it for files, so fall back to an <img> on a blob URL. */
+function decodeImage(file) {
+  if (typeof createImageBitmap === 'function') return createImageBitmap(file);
+  return new Promise(function (resolve, reject) {
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('unreadable')); };
+    img.src = url;
+  });
+}
+
+/*
+ * state.images holds what the form will send. Two shapes, one list:
+ * on create, { mime, data, previewUrl } for a picture picked just now; on edit,
+ * { id, previewUrl } for one already in Drive. The payload builder tells them
+ * apart by which mode the form is in, so everything else here can ignore it.
+ */
+function addPickedFiles(files) {
+  var room = MAX_IMAGES - state.images.length;
+  if (room <= 0) {
+    showFormError('Two screenshots is the limit.');
+    return;
+  }
+  var chosen = [];
+  for (var i = 0; i < files.length && chosen.length < room; i++) chosen.push(files[i]);
+  if (files.length > chosen.length) showFormError('Two screenshots is the limit.');
+
+  // One at a time: shrinking is the heavy bit, and doing both at once on a phone
+  // just makes them both slow. Also keeps the previews in the order picked.
+  var chain = Promise.resolve();
+  for (var c = 0; c < chosen.length; c++) {
+    chain = chain.then(shrinkThen(chosen[c]));
+  }
+}
+
+function shrinkThen(file) {
+  return function () {
+    return shrinkImage(file).then(function (item) {
+      if (state.images.length < MAX_IMAGES) state.images.push(item);
+      renderImages();
+    }, function () {
+      // A file the browser cannot decode (an unusual HEIC, a corrupt download)
+      // is dropped with one line. The rest of the form stays exactly as it was.
+      showFormError("Couldn't read that image.");
+    });
+  };
+}
+
+function renderImages() {
+  var row = $('picList');
+  row.textContent = '';
+
+  for (var i = 0; i < state.images.length; i++) {
+    var box = el('div', 'pic');
+    var img = document.createElement('img');
+    img.src = state.images[i].previewUrl;
+    img.alt = 'Screenshot ' + (i + 1);
+    box.appendChild(img);
+
+    var drop = el('button', 'drop', '×');
+    drop.type = 'button';
+    drop.setAttribute('data-drop', String(i));
+    drop.setAttribute('aria-label', 'Remove screenshot ' + (i + 1));
+    box.appendChild(drop);
+
+    row.appendChild(box);
+  }
+
+  // Decision 30: on edit a picture can be removed but not added, so the button
+  // is not offered there at all. Forgot one? Delete the report and post again.
+  var add = $('addPic');
+  add.hidden = !!state.editingId || state.images.length >= MAX_IMAGES;
+  add.textContent = state.images.length ? 'Add another' : 'Add a screenshot';
 }
 
 
@@ -904,12 +1099,14 @@ function applyReportLocally(report) {
       // An edit response carries no vote data, so keep what we already had.
       if (report.votes === undefined) report.votes = state.reports[i].votes;
       if (!report.voters) report.voters = state.reports[i].voters;
+      if (!report.images) report.images = state.reports[i].images || [];
       state.reports[i] = report;
       return;
     }
   }
   if (report.votes === undefined) report.votes = 0;
   if (!report.voters) report.voters = [];
+  if (!report.images) report.images = [];
   state.reports.push(report);
 }
 
@@ -993,6 +1190,11 @@ function card(r) {
 
   article.appendChild(el('p', 'text', r.text));
 
+  // Rows written before screenshots existed have no images field at all, so this
+  // has to cope with undefined, not just an empty list.
+  var shots = r.images || [];
+  if (shots.length) article.appendChild(thumbRow(shots));
+
   // Device is deliberately not shown. It is still captured silently and still
   // written to the Sheet, where the operator can use it to spot an iPhone-only
   // bug, but testers have no reason to see what phone anyone else is on.
@@ -1026,6 +1228,31 @@ function card(r) {
 
   article.appendChild(actions);
   return article;
+}
+
+/*
+ * Thumbnails open the full image in a new tab rather than a lightbox: the phone's
+ * own image viewer already pinches, zooms and saves, and writing a worse version
+ * of that is not worth the code. loading="lazy" keeps a long list from fetching
+ * twenty pictures nobody has scrolled to yet.
+ */
+function thumbRow(ids) {
+  var row = el('div', 'shots');
+  for (var i = 0; i < ids.length; i++) {
+    var link = document.createElement('a');
+    link.href = fullUrl(ids[i]);
+    link.target = '_blank';
+    link.rel = 'noopener';     // the opened tab must not get a handle on this one
+
+    var img = document.createElement('img');
+    img.src = thumbUrl(ids[i]);
+    img.loading = 'lazy';
+    img.alt = 'Screenshot';
+    link.appendChild(img);
+
+    row.appendChild(link);
+  }
+  return row;
 }
 
 
@@ -1081,6 +1308,14 @@ function openSheet(report) {
   state.level = report ? (report.level || null) : null;
   state.sending = false;
 
+  // On edit the form starts from the pictures the report already has, shown from
+  // Drive. On a new report it starts empty.
+  state.images = [];
+  var existing = report ? (report.images || []) : [];
+  for (var i = 0; i < existing.length; i++) {
+    state.images.push({ id: existing[i], previewUrl: thumbUrl(existing[i]) });
+  }
+
   $('sheetTitle').textContent = report ? ('Edit ' + reportLabel(report)) : 'Report something';
   $('submitBtn').textContent = report ? 'Save' : 'Send';
   $('textInput').value = report ? report.text : '';
@@ -1100,6 +1335,7 @@ function openSheet(report) {
 
   syncTypeButtons();
   renderLevels();
+  renderImages();
   syncSubmit();
 
   $('backdrop').hidden = false;
@@ -1115,6 +1351,10 @@ function closeSheet() {
   document.body.style.overflow = '';
   state.editingId = null;
   state.sending = false;
+  // Pictures are per-sheet. Leaving them behind would attach the last report's
+  // screenshots to the next one, and each one holds a base64 copy in memory.
+  state.images = [];
+  $('picInput').value = '';
 }
 
 function showFormError(message) {
@@ -1135,11 +1375,24 @@ function submitForm(event) {
   $('submitBtn').textContent = state.editingId ? 'Saving…' : 'Sending…';
   $('formError').hidden = true;
 
+  /*
+   * The same list, sent two ways. On create it carries the pictures themselves,
+   * base64, in this one request (decision 29): a second request for the pictures
+   * would mean a report whose screenshot never arrived, which is a failure state
+   * nobody could fix from the page. On edit it carries only the ids still wanted,
+   * and the door refuses anything that is not already on the row.
+   */
+  var images = [];
+  for (var i = 0; i < state.images.length; i++) {
+    var item = state.images[i];
+    images.push(state.editingId ? item.id : { mime: item.mime, data: item.data });
+  }
+
   var payload = state.editingId
     ? { action: 'update', id: state.editingId, name: name, type: state.type,
-        level: state.level || '', text: text }
+        level: state.level || '', text: text, images: images }
     : { action: 'create', name: name, type: state.type, level: state.level || '',
-        text: text, device: detectDevice() };
+        text: text, device: detectDevice(), images: images };
 
   var wasCreate = !state.editingId;
 
@@ -1353,6 +1606,21 @@ $('changeName').addEventListener('click', function () {
   $('nameInput').focus();
   syncSubmit();
   render();
+});
+
+$('addPic').addEventListener('click', function () { $('picInput').click(); });
+
+$('picInput').addEventListener('change', function (e) {
+  addPickedFiles(e.target.files);
+  // Cleared so that picking the same file again still fires a change event.
+  e.target.value = '';
+});
+
+$('picList').addEventListener('click', function (e) {
+  var drop = e.target.closest('button[data-drop]');
+  if (!drop) return;
+  state.images.splice(Number(drop.getAttribute('data-drop')), 1);
+  renderImages();
 });
 
 $('nameInput').addEventListener('input', syncSubmit);

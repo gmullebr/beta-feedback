@@ -42,7 +42,8 @@ These need clicks in Google's interface and cannot be done from the terminal.
    Rename the first tab to `reports`, add a second tab named `votes`. Put these headers in row 1,
    one per column, spelled exactly like this and all lower case:
 
-   - `reports`: `id`, `created_at`, `updated_at`, `name`, `type`, `level`, `text`, `device`, `deleted`
+   - `reports`: `id`, `created_at`, `updated_at`, `name`, `type`, `level`, `text`, `device`,
+     `images`, `deleted`
    - `votes`: `report_id`, `name`, `created_at`
 
    The script finds columns by header name, so the order can change later, but a misspelled header
@@ -75,6 +76,20 @@ Until step 5 is done the page shows "Not connected yet" instead of a list. That 
 **Any later change to `Code.gs` needs a new deployment version**, or the live door keeps running
 the old code. Deploy → Manage deployments → pencil icon → Version: **New version** → Deploy.
 Editing and saving the script in the editor is not enough. This catches everyone once.
+
+### Adding screenshots to a live door
+
+Only needed once, when moving a Sheet that predates screenshots onto the version of `Code.gs` that
+handles them. In this order, because the script stops on a Sheet that is missing a column it expects,
+so pasting first would take the door down until the header exists.
+
+1. In the `reports` tab, add a header `images` in the next empty column of row 1.
+2. Paste the new `apps-script/Code.gs` over the old one, save.
+3. Deploy → Manage deployments → pencil icon → Version: **New version** → Deploy.
+4. Authorise again. Google asks a second time because the script now touches Drive as well as the
+   Sheet, and that is a permission it did not have before.
+5. Post a test report with a picture. The door creates the Drive folder
+   `Walrus Club Beta Feedback screenshots` on the first upload; there is nothing to make by hand.
 
 ## Setup, GitHub side
 
@@ -117,9 +132,13 @@ Run these before sending the link to testers, on a phone or in a browser's phone
 - [ ] Private browsing: everything works, the name is asked each time.
 - [ ] Filters and both sorts behave; an empty filter shows a friendly line.
 - [ ] Nothing scrolls sideways on a narrow phone, and the Report button stays reachable.
+- [ ] A report posted with two pictures shows both, as thumbnails, on another phone.
+- [ ] A picture removed while editing a report is gone for everyone after Refresh.
 
 All of these were verified during the build against a local stand-in for Apps Script. They are
-repeated here because the real thing is Google's, not the stand-in's.
+repeated here because the real thing is Google's, not the stand-in's. The two screenshot lines are
+the ones to take seriously: the stand-in can hand back file ids, but only Drive can prove a picture
+actually loads on someone else's phone.
 
 ## Operating the test
 
@@ -133,12 +152,16 @@ repeated here because the real thing is Google's, not the stand-in's.
   (Bug, Idea, Other) and is worked out by the page; only the number is stored. So `#B14` is the row with
   `id` 14. If someone edited that report's type since posting, the letter shown will have changed but the
   number never does, so look up the number and ignore the letter.
-- **Screenshots** go in the WhatsApp group with the report number, for example `#B14`. The page says
-  so at the top.
+- **Screenshots** live in a Drive folder named `Walrus Club Beta Feedback screenshots`, created by
+  the door on the first upload. One file per picture, named after the report it belongs to, so
+  `B14-1.jpg` is the first picture on report 14. The `images` cell holds the file ids. Deleting a
+  report does not remove its pictures, the same way a soft delete leaves the row: to remove a picture
+  for real, delete the file in Drive.
 - **Fixing data by hand** is fine. Edit cells in the Sheet directly; the page picks the change up on
   the next Refresh. Do not renumber `id`, since `votes.report_id` points at it.
 
 ## Out of scope for the 30 days
 
-Status labels, comments, notifications, brand styling, login, image upload, admin screen. Section 11
-of the spec lists what could come later.
+Status labels, comments, notifications, brand styling, login, admin screen. Screenshots were out of
+scope until 2026-09-18, when decision 7 was reversed and testers got the two-picture upload. Section
+11 of the spec lists what could still come later.

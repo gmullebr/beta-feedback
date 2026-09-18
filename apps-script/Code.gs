@@ -12,10 +12,23 @@
 var REPORTS_TAB = 'reports';
 var VOTES_TAB = 'votes';
 
-var REPORT_HEADERS = ['id', 'created_at', 'updated_at', 'name', 'type', 'level', 'text', 'device', 'deleted'];
+var REPORT_HEADERS = ['id', 'created_at', 'updated_at', 'name', 'type', 'level', 'text', 'device', 'images', 'deleted'];
 var VOTE_HEADERS = ['report_id', 'name', 'created_at'];
 
 var TYPES = ['bug', 'idea', 'other'];
+
+// The letter in front of a report number (#B14). The page works this out too, but
+// the door needs it as well to give an uploaded file a name a human can recognise.
+var TYPE_LETTERS = { bug: 'B', idea: 'I', other: 'O' };
+
+/*
+ * Screenshots (decisions 27 to 31). Two per report, each already shrunk by the
+ * page to 1280 px JPEG, so the cap below is generous: it is there to stop someone
+ * posting a 40 MB file straight at the door, not to squeeze honest screenshots.
+ */
+var MAX_IMAGES = 2;
+var MAX_IMAGE_BYTES = 1500000;
+var IMAGE_FOLDER_NAME = 'Walrus Club Beta Feedback screenshots';
 
 // Levels are per type. An empty array means the type carries no level at all.
 var LEVELS = {
@@ -120,6 +133,7 @@ function listReports() {
       level: str(cell(row, reports.col, 'level')),
       text: str(cell(row, reports.col, 'text')),
       device: str(cell(row, reports.col, 'device')),
+      images: parseImageIds(cell(row, reports.col, 'images')),
       votes: voters.length,
       voters: voters
     });
@@ -134,6 +148,9 @@ function createReport(body) {
   var level = requireLevel(type, body.level);
   var text = requireText(body.text);
   var device = DEVICES.indexOf(str(body.device)) === -1 ? 'Other' : str(body.device);
+  // Decoded and checked before anything is written, so a bad picture fails the
+  // whole create rather than leaving a report next to a half-done upload.
+  var pictures = requireNewImages(body.images);
 
   var t = readTable(REPORTS_TAB, REPORT_HEADERS);
   var now = new Date().toISOString();
@@ -146,9 +163,13 @@ function createReport(body) {
   }
   var id = maxId + 1;
 
+  // Drive is only touched when there is something to put in it, so a report with
+  // no picture costs exactly what it cost before this feature existed.
+  var imageIds = pictures.length ? saveImages(type, id, pictures) : [];
+
   var values = {
     id: id, created_at: now, updated_at: now, name: name, type: type,
-    level: level, text: text, device: device, deleted: false
+    level: level, text: text, device: device, images: imageIds.join(','), deleted: false
   };
 
   // Build the row in the sheet's own column order, not ours, so the columns can
@@ -164,7 +185,7 @@ function createReport(body) {
     ok: true,
     report: {
       id: id, created_at: now, updated_at: now, name: name, type: type,
-      level: level, text: text, device: device, votes: 0, voters: []
+      level: level, text: text, device: device, images: imageIds, votes: 0, voters: []
     }
   };
 }
@@ -183,12 +204,18 @@ function updateReport(body) {
   var type = requireType(body.type);
   var level = requireLevel(type, body.level);
   var text = requireText(body.text);
+  var currentImages = parseImageIds(cell(found.row, t.col, 'images'));
+  var keptImages = requireKeptImages(currentImages, body.images);
   var now = new Date().toISOString();
 
   // Name is deliberately not editable: it is the only thing tying a report to
   // its author, so letting it change would hand ownership to someone else.
+  //
+  // Dropped pictures are forgotten here but left in Drive, the same way a deleted
+  // report stays in the Sheet: the operator, not the tester, does the real
+  // deleting. It also means a mis-tap is recoverable from the folder.
   setCells(t, found.sheetRow, found.row,
-    { type: type, level: level, text: text, updated_at: now });
+    { type: type, level: level, text: text, images: keptImages.join(','), updated_at: now });
 
   return {
     ok: true,
@@ -200,7 +227,8 @@ function updateReport(body) {
       type: type,
       level: level,
       text: text,
-      device: str(cell(found.row, t.col, 'device'))
+      device: str(cell(found.row, t.col, 'device')),
+      images: keptImages
     }
   };
 }
@@ -343,6 +371,77 @@ function findReportRow(t, rawId) {
 
 
 /* ------------------------------------------------------------------ *
+ * Screenshots in Drive
+ * ------------------------------------------------------------------ */
+
+/**
+ * The folder the door writes pictures into, found by name at the root of the
+ * owner's Drive and created on the first upload. Nothing to set up by hand, and
+ * nothing to configure: a folder id in this file would be one more thing to keep
+ * in step between the repo and the pasted copy.
+ *
+ * Cached like _book, because getFoldersByName is a round trip and a create with
+ * two pictures would otherwise pay for it twice.
+ */
+var _imageFolder = null;
+
+function imageFolder() {
+  if (_imageFolder) return _imageFolder;
+
+  var existing = DriveApp.getFoldersByName(IMAGE_FOLDER_NAME);
+  if (existing.hasNext()) {
+    _imageFolder = existing.next();
+    return _imageFolder;
+  }
+
+  _imageFolder = DriveApp.createFolder(IMAGE_FOLDER_NAME);
+  // Same sharing as the files: the page shows pictures to testers who have no
+  // Google account at all, so "anyone with the link can view" is what makes them
+  // load. Accepted with decision 27: these images are reachable by URL.
+  _imageFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return _imageFolder;
+}
+
+/**
+ * Writes the decoded pictures to Drive and hands back their file ids.
+ * Names look like B14-1.jpg, so the operator opening the folder can tell at a
+ * glance which report a picture belongs to without opening anything.
+ */
+function saveImages(type, id, pictures) {
+  var folder = imageFolder();
+  var ids = [];
+  for (var i = 0; i < pictures.length; i++) {
+    var name = (TYPE_LETTERS[type] || '') + id + '-' + (i + 1) + '.' + extensionFor(pictures[i].mime);
+    var blob = Utilities.newBlob(pictures[i].bytes, pictures[i].mime, name);
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    ids.push(file.getId());
+  }
+  return ids;
+}
+
+/** image/jpeg to jpg, and anything else to whatever follows the slash. */
+function extensionFor(mime) {
+  var subtype = str(mime).toLowerCase().split('/')[1] || 'img';
+  if (subtype === 'jpeg') return 'jpg';
+  return subtype.replace(/[^a-z0-9]/g, '') || 'img';
+}
+
+/** The cell holds "id1,id2". Empty cell, empty list. */
+function parseImageIds(value) {
+  var raw = str(value);
+  if (!raw) return [];
+  var parts = raw.split(',');
+  var ids = [];
+  for (var i = 0; i < parts.length; i++) {
+    var id = parts[i].trim();
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
+
+/* ------------------------------------------------------------------ *
  * Validation
  * ------------------------------------------------------------------ */
 
@@ -372,6 +471,64 @@ function requireLevel(type, raw) {
   return level;
 }
 
+/**
+ * Pictures arriving with a create: a list of { mime, data } with data base64 and
+ * no data-URL prefix. Returns them decoded, ready for Drive.
+ *
+ * Anyone holding the page's link can call this door, so every one of these checks
+ * is the only thing standing between a public URL and someone else's Drive quota.
+ */
+function requireNewImages(raw) {
+  if (raw === null || raw === undefined || raw === '') return [];
+  if (!isArray(raw)) throw new Error('Screenshots must be sent as a list.');
+  if (raw.length > MAX_IMAGES) {
+    throw new Error('At most ' + MAX_IMAGES + ' screenshots per report.');
+  }
+
+  var out = [];
+  for (var i = 0; i < raw.length; i++) {
+    var item = raw[i] || {};
+    var mime = str(item.mime).toLowerCase();
+    if (mime.indexOf('image/') !== 0) throw new Error('Only images can be attached.');
+
+    var bytes;
+    try {
+      bytes = Utilities.base64Decode(str(item.data));
+    } catch (e) {
+      throw new Error('A screenshot could not be read.');
+    }
+    if (!bytes || !bytes.length) throw new Error('A screenshot arrived empty.');
+    if (bytes.length > MAX_IMAGE_BYTES) throw new Error('A screenshot is too large.');
+
+    out.push({ mime: mime, bytes: bytes });
+  }
+  return out;
+}
+
+/**
+ * Pictures arriving with an update: the ids to KEEP. Removal only, per decision
+ * 30, so anything not already on the row is refused. Without the subset check the
+ * field would be a way to point any report at any file in the folder.
+ *
+ * A missing field means "leave them alone": an older page that knows nothing
+ * about pictures must not wipe them by staying silent.
+ */
+function requireKeptImages(currentIds, raw) {
+  if (raw === null || raw === undefined) return currentIds;
+  if (!isArray(raw)) throw new Error('Screenshots must be sent as a list.');
+
+  var kept = [];
+  for (var i = 0; i < raw.length; i++) {
+    var id = str(raw[i]);
+    if (!id) continue;
+    if (currentIds.indexOf(id) === -1) {
+      throw new Error('Screenshots can be removed on edit, not added.');
+    }
+    if (kept.indexOf(id) === -1) kept.push(id);
+  }
+  return kept;
+}
+
 /** Ownership and vote identity: trimmed, case-insensitive. */
 function sameName(a, b) {
   return str(a).toLowerCase() === str(b).toLowerCase();
@@ -384,6 +541,12 @@ function sameName(a, b) {
 
 function str(value) {
   return String(value === null || value === undefined ? '' : value).trim();
+}
+
+/* JSON.parse hands back a real array, so this is only here to keep the two image
+   checks readable and to say out loud that a bare object is not a list. */
+function isArray(value) {
+  return Object.prototype.toString.call(value) === '[object Array]';
 }
 
 function num(value) {
