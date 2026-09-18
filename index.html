@@ -1122,16 +1122,31 @@ function removeReportLocally(id) {
  * hear about it.
  */
 function findAlreadyLanded(name, text) {
+  return apiGet().then(function (reports) { return findCreated(reports, name, text); });
+}
+
+function findCreated(reports, name, text) {
   var wanted = String(text).trim();
-  return apiGet().then(function (reports) {
-    var cutoff = Date.now() - 600000;
-    for (var i = 0; i < reports.length; i++) {
-      var r = reports[i];
-      if (sameName(r.name, name) && r.text === wanted &&
-          new Date(r.created_at).getTime() >= cutoff) return r;
-    }
-    return null;
-  });
+  var cutoff = Date.now() - 600000;
+  for (var i = 0; i < reports.length; i++) {
+    var r = reports[i];
+    if (sameName(r.name, name) && r.text === wanted &&
+        new Date(r.created_at).getTime() >= cutoff) return r;
+  }
+  return null;
+}
+
+/* An edit has landed when the row now says what we asked it to say. */
+function findEdited(reports, payload) {
+  for (var i = 0; i < reports.length; i++) {
+    var r = reports[i];
+    if (r.id !== payload.id) continue;
+    var same = r.type === payload.type && (r.level || '') === (payload.level || '') &&
+      r.text === String(payload.text).trim() &&
+      (r.images || []).join(',') === (payload.images || []).join(',');
+    return same ? r : null;
+  }
+  return null;
 }
 
 function render() {
@@ -1425,13 +1440,37 @@ function submitForm(event) {
     showFormError("Couldn't send. Check your connection and try again.");
   }
 
+  /*
+   * Apps Script hands a POST answer back through a redirect to a holding page.
+   * When the door is slow, twenty seconds or more, that page is sometimes gone
+   * by the time the browser gets there: Google either answers 404 (readBody
+   * marks that transient) or bounces the browser back to the door as a plain
+   * GET, so the answer arrives as the whole list instead of one report. In both
+   * cases the write itself has almost always landed, and telling the tester it
+   * failed would be wrong. So: a list is taken as the fresh truth and searched;
+   * anything else triggers one re-read and the same search.
+   */
+  function landedIn(reports) {
+    return wasCreate ? findCreated(reports, name, text) : findEdited(reports, payload);
+  }
+
   apiPost(payload)
-    .then(function (data) { settle(data && data.report); })
+    .then(function (data) {
+      if (data.reports) {
+        state.reports = data.reports;
+        var landed = landedIn(data.reports);
+        if (landed) settle(landed); else fail();
+        return;
+      }
+      settle(data.report);
+    })
     .catch(function () {
-      if (!wasCreate) { fail(); return; }        // edits are safe to repeat
       $('submitBtn').textContent = 'Checking…';
-      findAlreadyLanded(name, text)
-        .then(function (landed) { if (landed) settle(landed); else fail(); })
+      apiGet()
+        .then(function (reports) {
+          var landed = landedIn(reports);
+          if (landed) { state.reports = reports; settle(landed); } else fail();
+        })
         .catch(fail);
     });
 }
@@ -1460,12 +1499,21 @@ function toggleVote(id, button) {
   applyVoteLocally(report, wanted);
   redrawVote(button, report, wanted);
 
+  // A failed answer is not a failed vote: when the door is slow Google can lose
+  // the answer after the row was written (see submitForm). So ask for the truth
+  // first, and only snap back when even that cannot be had. refresh never
+  // rejects, it just leaves lastLoadedAt alone, so that is the tell.
   apiPost({ action: wanted ? 'vote' : 'unvote', id: id, name: state.name })
     .then(function () { return refresh(); })
     .catch(function () {
-      applyVoteLocally(report, voted);
-      redrawVote(button, report, voted);
-      showToastError();
+      if (state.loading) return;                  // a refresh in flight will bring the truth
+      var before = state.lastLoadedAt;
+      return refresh().then(function () {
+        if (state.lastLoadedAt !== before) return;  // fresh list is on screen, whatever it says
+        applyVoteLocally(report, voted);
+        redrawVote(button, report, voted);
+        showToastError();
+      });
     });
 }
 
