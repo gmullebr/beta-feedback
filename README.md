@@ -22,6 +22,7 @@ door and the store each phone would only ever see its own posts.
 ```
 index.html              the whole page: HTML, CSS and JavaScript, no dependencies
 apps-script/Code.gs     the door. Source of truth, pasted into Google by hand
+apps-script/appsscript.json  the door's manifest: the exact permissions it holds, pasted the same way
 README.md               this file
 ```
 
