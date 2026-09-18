@@ -375,50 +375,59 @@ function findReportRow(t, rawId) {
  * ------------------------------------------------------------------ */
 
 /**
- * The folder the door writes pictures into, created on the first upload.
- * Nothing to set up by hand.
+ * Drive access goes through the "advanced Drive service" (the raw Drive API,
+ * enabled in the manifest under enabledAdvancedServices) and not through the
+ * friendlier built-in DriveApp. The reason is permissions: DriveApp refuses to
+ * run under anything narrower than full read-write access to the owner's whole
+ * Drive, while the Drive API accepts the drive.file scope, which covers only the
+ * files this script created. The manifest grants exactly that. The price is a
+ * slightly more verbose call for the three things we do: make a folder, put a
+ * file in it, share it by link.
  *
- * Why the id is remembered rather than the folder searched for by name: the
- * manifest grants the script the narrow drive.file scope, which covers only
- * files it created itself. Searching Drive by name is a "read all of Drive"
- * action and needs the wide scope, which is exactly the permission the manifest
- * exists to avoid. Opening a folder by id is allowed for a folder the script
- * made, so the id goes into the script's own key-value store (PropertiesService,
- * no scope needed) the moment the folder is created.
+ * The folder is created on the first upload, nothing to set up by hand. Its id
+ * is kept in the script's own key-value store (PropertiesService, no scope
+ * needed), because under drive.file "find my folder by name" is a search over
+ * all of Drive and is refused, while "open this id" is allowed for a folder the
+ * script made. If the operator trashes the folder, a fresh one is created on the
+ * next upload; old pictures keep their ids and still resolve.
  *
- * If the operator trashes or deletes that folder, the stored id points at
- * nothing and a fresh folder is created on the next upload. Old pictures stay
- * where they were and their ids in the Sheet still resolve.
- *
- * Cached like _book: a create with two pictures would otherwise open the folder twice.
+ * Cached like _book: a create with two pictures would otherwise check the folder twice.
  */
 var FOLDER_ID_KEY = 'imageFolderId';
-var _imageFolder = null;
+var FOLDER_MIME = 'application/vnd.google-apps.folder';
+var _imageFolderId = null;
 
-function imageFolder() {
-  if (_imageFolder) return _imageFolder;
+function imageFolderId() {
+  if (_imageFolderId) return _imageFolderId;
 
   var props = PropertiesService.getScriptProperties();
   var storedId = props.getProperty(FOLDER_ID_KEY);
   if (storedId) {
     try {
-      var found = DriveApp.getFolderById(storedId);
-      if (!found.isTrashed()) {
-        _imageFolder = found;
-        return _imageFolder;
+      var found = Drive.Files.get(storedId, { fields: 'id,trashed' });
+      if (found && !found.trashed) {
+        _imageFolderId = storedId;
+        return _imageFolderId;
       }
     } catch (err) {
       // Deleted for good, or never ours. Fall through and make a new one.
     }
   }
 
-  _imageFolder = DriveApp.createFolder(IMAGE_FOLDER_NAME);
-  // Same sharing as the files: the page shows pictures to testers who have no
-  // Google account at all, so "anyone with the link can view" is what makes them
-  // load. Accepted with decision 27: these images are reachable by URL.
-  _imageFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  props.setProperty(FOLDER_ID_KEY, _imageFolder.getId());
-  return _imageFolder;
+  var folder = Drive.Files.create({ name: IMAGE_FOLDER_NAME, mimeType: FOLDER_MIME }, null, { fields: 'id' });
+  shareByLink(folder.id);
+  props.setProperty(FOLDER_ID_KEY, folder.id);
+  _imageFolderId = folder.id;
+  return _imageFolderId;
+}
+
+/**
+ * "Anyone with the link can view". The page shows pictures to testers who have
+ * no Google account at all, so this is what makes them load. Accepted with
+ * decision 27: these images are reachable by URL.
+ */
+function shareByLink(fileId) {
+  Drive.Permissions.create({ type: 'anyone', role: 'reader' }, fileId);
 }
 
 /**
@@ -427,14 +436,14 @@ function imageFolder() {
  * glance which report a picture belongs to without opening anything.
  */
 function saveImages(type, id, pictures) {
-  var folder = imageFolder();
+  var folderId = imageFolderId();
   var ids = [];
   for (var i = 0; i < pictures.length; i++) {
     var name = (TYPE_LETTERS[type] || '') + id + '-' + (i + 1) + '.' + extensionFor(pictures[i].mime);
     var blob = Utilities.newBlob(pictures[i].bytes, pictures[i].mime, name);
-    var file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    ids.push(file.getId());
+    var file = Drive.Files.create({ name: name, parents: [folderId] }, blob, { fields: 'id' });
+    shareByLink(file.id);
+    ids.push(file.id);
   }
   return ids;
 }
